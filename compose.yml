@@ -1,11 +1,17 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        APP_BASE_PATH: ${APP_BASE_PATH:-}
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       DATABASE_PATH: /data/todo.sqlite
+      APP_URL: ${APP_URL:-}
+      APP_BASE_PATH: ${APP_BASE_PATH:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
