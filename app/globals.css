@@ -230,10 +230,37 @@ h1, h2, h3, p { margin-top: 0; }
 .admin-table th { color: var(--muted); font-size: 12px; }
 .inline-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 
-@media (max-width: 1120px) {
-  .app-shell { grid-template-columns: 210px minmax(0, 1fr); }
-  .right-panel { position: fixed; right: 18px; bottom: 18px; top: auto; width: 300px; min-height: auto; z-index: 10; box-shadow: var(--shadow); }
-  .main-panel { padding: 30px; }
+@media (max-width: 1440px) and (min-width: 1121px) {
+  .app-shell { grid-template-columns: 220px minmax(0, 1fr) 270px; gap: 14px; padding: 14px; }
+  .main-panel { padding: 30px 28px; }
+  .right-panel { padding: 24px 18px; }
+}
+@media (max-width: 1120px) and (min-width: 761px) {
+  .app-shell { display: block; padding: 14px; }
+  .sidebar { min-height: auto; position: static; padding: 16px; margin-bottom: 14px; }
+  .sidebar .brand { padding-bottom: 16px; }
+  .nav-label, .sidebar-footer { display: none; }
+  .theme-list { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .theme-button { width: auto; flex: none; }
+  .theme-select { min-width: 108px; }
+  .main-panel { min-height: auto; padding: 30px; }
+  .right-panel {
+    position: static;
+    width: auto;
+    min-height: auto;
+    margin-top: 14px;
+    padding: 18px 22px;
+    display: grid;
+    grid-template-columns: 146px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px 18px;
+  }
+  .right-panel > h2, .right-panel > .muted { grid-column: 2; margin: 0; }
+  .right-panel > .progress-ring { grid-column: 1; grid-row: 1 / span 4; margin: 0; }
+  .right-panel > .stat-grid { grid-column: 2; grid-row: 3; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 4px 0; }
+  .right-panel > .button { grid-column: 2; }
+  .right-panel > .quote-card { grid-column: 2; margin: 0; }
+  .task-card { min-width: 0; }
 }
 @media (max-width: 760px) {
   .app-shell { display: block; padding: 10px; }
