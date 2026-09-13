@@ -6,13 +6,17 @@ RUN npm ci
 
 FROM node:24-alpine AS builder
 WORKDIR /app
+ARG APP_BASE_PATH=
+ENV APP_BASE_PATH=$APP_BASE_PATH
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
 FROM node:24-alpine AS runner
 WORKDIR /app
+ARG APP_BASE_PATH=
 ENV NODE_ENV=production
+ENV APP_BASE_PATH=$APP_BASE_PATH
 ENV DATABASE_PATH=/data/todo.sqlite
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
