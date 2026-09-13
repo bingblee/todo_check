@@ -3,14 +3,48 @@ import "server-only";
 import { and, eq, gt } from "drizzle-orm";
 import { createHash, randomBytes, randomUUID, scrypt as nodeScrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { sessions, users, type User } from "@/lib/db/schema";
 
-const COOKIE_NAME = "checkin_session";
+const BASE_COOKIE_NAME = "checkin_session";
 const SESSION_DAYS = 30;
 const scrypt = promisify(nodeScrypt);
+
+function appBasePath() {
+  const value = process.env.APP_BASE_PATH?.trim() ?? "";
+  if (!value || value === "/") return "";
+  return `/${value.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function sessionCookieName() {
+  const suffix = appBasePath().slice(1).replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return suffix ? `${BASE_COOKIE_NAME}_${suffix}` : BASE_COOKIE_NAME;
+}
+
+function sessionCookiePath() {
+  return appBasePath() || "/";
+}
+
+async function secureCookie() {
+  const configured = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  if (configured === "true") return true;
+  if (configured === "false") return false;
+
+  const forwardedProto = (await headers()).get("x-forwarded-proto")?.split(",")[0].trim().toLowerCase();
+  if (forwardedProto === "http" || forwardedProto === "https") return forwardedProto === "https";
+
+  const appUrl = process.env.APP_URL?.trim();
+  if (appUrl) {
+    try {
+      return new URL(appUrl).protocol === "https:";
+    } catch {
+      // Fall back to the deployment mode for an invalid or incomplete APP_URL.
+    }
+  }
+  return process.env.NODE_ENV === "production";
+}
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -46,24 +80,30 @@ export async function createSession(userId: string) {
     createdAt: now.toISOString(),
   });
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, rawToken, {
+  cookieStore.set(sessionCookieName(), rawToken, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
+    secure: await secureCookie(),
+    path: sessionCookiePath(),
     expires: expiresAt,
   });
 }
 
 export async function destroySession() {
   const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
+  const token = cookieStore.get(sessionCookieName())?.value;
   if (token) await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
-  cookieStore.delete(COOKIE_NAME);
+  cookieStore.set(sessionCookieName(), "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: await secureCookie(),
+    path: sessionCookiePath(),
+    expires: new Date(0),
+  });
 }
 
 export async function getCurrentUser(): Promise<User | null> {
-  const token = (await cookies()).get(COOKIE_NAME)?.value;
+  const token = (await cookies()).get(sessionCookieName())?.value;
   if (!token) return null;
   const rows = await db
     .select({ user: users })
