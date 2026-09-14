@@ -24,7 +24,12 @@ function sessionCookieName() {
 }
 
 function sessionCookiePath() {
-  return appBasePath() || "/";
+  // The app has protected routes at /app, /summary, /settings and /today.
+  // Restricting this to APP_BASE_PATH would make a value such as `/app`
+  // accidentally hide the session from every other page. A root-scoped
+  // cookie works both for normal deployments and for apps mounted behind a
+  // reverse-proxy sub-path.
+  return "/";
 }
 
 async function secureCookie() {

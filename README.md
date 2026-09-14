@@ -46,7 +46,9 @@ APP_BASE_PATH=/todo
 AUTH_COOKIE_SECURE=true
 ```
 
-`APP_BASE_PATH` 会在 Next.js 构建时写入前端资源，修改后必须重新执行 `docker compose up -d --build`。Cookie 会按 `/todo` 隔离，避免与同一域名根路径上的其他服务互相覆盖。
+`APP_BASE_PATH` 会在 Next.js 构建时写入前端资源，修改后必须重新执行 `docker compose up -d --build`。Session Cookie 使用根路径，以确保应用内各个受保护页面共享登录状态。
+
+注意：`APP_BASE_PATH` 只表示反向代理挂载的公共前缀，不是应用内的 `/app` 页面路径。Session Cookie 使用全站 `/` 路径，以便在 `/app`、`/summary`、`/settings` 和 `/today` 之间保持登录状态。
 
 Nginx 要保留 `/todo` 前缀并传递外部协议：
 
