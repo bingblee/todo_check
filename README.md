@@ -79,6 +79,26 @@ node scripts/backup.mjs
 
 Docker 部署可将数据卷中的数据库复制到安全位置，或在容器内运行备份脚本并挂载独立备份目录。备份脚本使用 SQLite 在线备份 API，可在 WAL 模式下获得一致快照。
 
+## 管理员密码重置
+
+忘记密码时，不能还原原密码，只能在部署服务器上重置。进入项目目录执行：
+
+```bash
+npm run auth:reset -- --username admin
+```
+
+命令会隐藏输入新密码，并撤销该账号的所有旧登录会话。Docker 部署可在容器内执行：
+
+```bash
+docker compose exec app node scripts/reset-password.mjs --username admin
+```
+
+也可以通过标准输入传入密码（适合无交互终端），避免把密码写进命令历史：
+
+```bash
+printf '%s\\n' '新的安全密码' | docker compose exec -T app node scripts/reset-password.mjs --username admin --password-stdin
+```
+
 ## 验证
 
 ```bash
