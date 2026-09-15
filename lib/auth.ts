@@ -32,21 +32,18 @@ function sessionCookieName() {
 }
 
 function sessionCookiePath() {
-  // The app has protected routes at /app, /summary, /settings and /today.
-  // Restricting this to APP_BASE_PATH would make a value such as `/app`
-  // accidentally hide the session from every other page. A root-scoped
-  // cookie works both for normal deployments and for apps mounted behind a
-  // reverse-proxy sub-path.
+  // The default deployment is mounted at the domain root. A root-scoped
+  // cookie covers every protected route in the app (/app, /summary, etc.).
   return "/";
 }
 
 async function secureCookie() {
+  const forwardedProto = (await headers()).get("x-forwarded-proto")?.split(",")[0].trim().toLowerCase();
+  if (forwardedProto === "http" || forwardedProto === "https") return forwardedProto === "https";
+
   const configured = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
   if (configured === "true") return true;
   if (configured === "false") return false;
-
-  const forwardedProto = (await headers()).get("x-forwarded-proto")?.split(",")[0].trim().toLowerCase();
-  if (forwardedProto === "http" || forwardedProto === "https") return forwardedProto === "https";
 
   const appUrl = process.env.APP_URL?.trim();
   if (appUrl) {
