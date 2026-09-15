@@ -12,6 +12,7 @@ import { archiveTaskAction, archiveThemeAction, reorderTasksAction, reorderTheme
 import { SubmitButton } from "@/components/submit-button";
 
 type DashboardData = { localDate: string; themes: Theme[]; tasks: Task[]; checkins: Checkin[] };
+type CheckinResult = { status: "completed" | "undone"; taskTitle?: string; awardedScore?: number };
 type ModalState =
   | { type: "theme"; item?: Theme }
   | { type: "task"; item?: Task }
@@ -53,12 +54,14 @@ function applyStoredOrder<T extends { id: string; sortOrder: number }>(items: T[
   });
 }
 
-export function Dashboard({ user, data }: { user: { username: string; role: "admin" | "user" }; data: DashboardData }) {
+export function Dashboard({ user, data, initialView = "theme" }: { user: { username: string; role: "admin" | "user" }; data: DashboardData; initialView?: "theme" | "today" }) {
   const [selectedThemeId, setSelectedThemeId] = useState(data.themes[0]?.id ?? "");
+  const [view, setView] = useState<"theme" | "today">(initialView);
   const [modal, setModal] = useState<ModalState>(null);
   const [themeOrder, setThemeOrder] = useState(() => data.themes.map((item) => item.id));
   const [taskOrder, setTaskOrder] = useState(() => data.tasks.map((item) => item.id));
   const [celebration, setCelebration] = useState<Celebration | null>(null);
+  const [checkins, setCheckins] = useState(data.checkins);
   const orderedThemes = applyStoredOrder(data.themes, themeOrder);
   const orderedTasks = applyStoredOrder(data.tasks, taskOrder);
   const sensors = useSensors(
@@ -67,8 +70,8 @@ export function Dashboard({ user, data }: { user: { username: string; role: "adm
   );
 
   const selectedTheme = orderedThemes.find((theme) => theme.id === selectedThemeId) ?? orderedThemes[0];
-  const completedTaskIds = useMemo(() => new Set(data.checkins.map((item) => item.taskId)), [data.checkins]);
-  const todayCheckins = useMemo(() => new Map(data.checkins.filter((item) => item.localDate === data.localDate).map((item) => [item.taskId, item])), [data]);
+  const completedTaskIds = useMemo(() => new Set(checkins.map((item) => item.taskId)), [checkins]);
+  const todayCheckins = useMemo(() => new Map(checkins.filter((item) => item.localDate === data.localDate).map((item) => [item.taskId, item])), [checkins, data.localDate]);
   const visibleTasks = orderedTasks.filter((task) => {
     if (task.themeId !== selectedTheme?.id) return false;
     if (task.type === "habit") return isScheduledOn(task, data.localDate);
@@ -79,7 +82,7 @@ export function Dashboard({ user, data }: { user: { username: string; role: "adm
   const completed = visibleTasks.filter((task) => todayCheckins.has(task.id)).length;
   const percent = visibleTasks.length ? Math.round((completed / visibleTasks.length) * 100) : 0;
 
-  const activeDates = new Set(data.checkins.map((item) => item.localDate));
+  const activeDates = new Set(checkins.map((item) => item.localDate));
   let streak = 0;
   for (let i = 0; i < 366; i++) {
     if (!activeDates.has(previousDate(data.localDate, i))) break;
@@ -101,13 +104,28 @@ export function Dashboard({ user, data }: { user: { username: string; role: "adm
     if (selectedTheme) void reorderTasksAction(selectedTheme.id, orderedIds);
   }
 
+  function handleThemeTaskReorder(themeId: string, orderedIds: string[]) {
+    setTaskOrder(reorderSubset(orderedTasks, orderedIds).map((item) => item.id));
+    void reorderTasksAction(themeId, orderedIds);
+  }
+
+  function handleCheckinResult(task: Task, theme: Theme, result: { status: "completed" | "undone"; taskTitle?: string; awardedScore?: number }) {
+    setCheckins((current) => {
+      const next = current.filter((item) => !(item.taskId === task.id && item.localDate === data.localDate));
+      if (result.status === "completed") next.push({ id: `optimistic-${task.id}`, userId: "", taskId: task.id, localDate: data.localDate, note: "", awardedScore: result.awardedScore ?? task.completionScore, completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      return next;
+    });
+    if (result.status === "completed") setCelebration({ taskTitle: result.taskTitle ?? task.title, score: result.awardedScore ?? 0, color: theme.color });
+  }
+
   return <main className="app-shell">
     <aside className="panel sidebar">
       <div className="brand"><span className="brand-mark">✓</span><span>拾光清单</span></div>
+      <button type="button" className={`theme-button today-nav-item ${view === "today" ? "active" : ""}`} onClick={() => setView("today")}><span className="theme-dot" style={{ "--theme-color": "#73947c" } as CSSProperties}>◷</span><span>今日 Todo</span></button>
       <div className="nav-label">我的主题</div>
       <DndContext id="themes" sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleThemeDrag}>
         <SortableContext items={orderedThemes.map((theme) => theme.id)} strategy={rectSortingStrategy}>
-          <div className="theme-list">{orderedThemes.map((theme) => <SortableTheme key={theme.id} theme={theme} active={theme.id === selectedTheme?.id} select={() => setSelectedThemeId(theme.id)} />)}</div>
+          <div className="theme-list">{orderedThemes.map((theme) => <SortableTheme key={theme.id} theme={theme} active={view === "theme" && theme.id === selectedTheme?.id} select={() => { setSelectedThemeId(theme.id); setView("theme"); }} />)}</div>
         </SortableContext>
       </DndContext>
       <button className="theme-button add-theme" onClick={() => setModal({ type: "theme" })}><span className="theme-dot" style={{ "--theme-color": "#bbb7ad" } as CSSProperties}>＋</span><span>新建主题</span></button>
@@ -116,21 +134,22 @@ export function Dashboard({ user, data }: { user: { username: string; role: "adm
 
     <section className="panel main-panel">
       <div className="top-row">
-        <div><p className="eyebrow">{formatChineseDate(data.localDate)}</p><h1 className="date-title">今天，稳稳向前</h1><p className="muted">你好，{user.username}。完成一点，也值得被记录。</p></div>
-        {selectedTheme && <div className="toolbar"><button className="button ghost small" onClick={() => setModal({ type: "theme", item: selectedTheme })}>编辑主题</button><button className="button small" onClick={() => setModal({ type: "task" })}>＋ 新任务</button></div>}
+        <div><p className="eyebrow">{formatChineseDate(data.localDate)}</p><h1 className="date-title">{view === "today" ? "今日 Todo" : "今天，稳稳向前"}</h1><p className="muted">{view === "today" ? "把所有主题里今天要做的事，集中在这里完成。" : `你好，${user.username}。完成一点，也值得被记录。`}</p></div>
+        {view === "theme" && selectedTheme && <div className="toolbar"><button className="button ghost small" onClick={() => setModal({ type: "theme", item: selectedTheme })}>编辑主题</button><button className="button small" onClick={() => setModal({ type: "task" })}>＋ 新任务</button></div>}
       </div>
-      {!selectedTheme ? <div className="empty-state"><h3>从一个主题开始</h3><p>比如阅读、运动或工作，然后把目标变成每日打卡。</p><button className="button" onClick={() => setModal({ type: "theme" })}>创建主题</button></div> : <>
-        <TaskSection title="习惯打卡" subtitle={`${habits.filter((task) => todayCheckins.has(task.id)).length}/${habits.length}`} tasks={habits} theme={selectedTheme} todayCheckins={todayCheckins} localDate={data.localDate} onMenu={(item, checkin) => setModal({ type: "task-menu", item, checkin })} onReorder={handleTaskReorder} onCompleted={(result) => result.status === "completed" && setCelebration({ taskTitle: result.taskTitle ?? "任务", score: result.awardedScore ?? 0, color: selectedTheme.color })} />
-        <TaskSection title="一次性任务" subtitle={`${oneTime.filter((task) => todayCheckins.has(task.id)).length}/${oneTime.length}`} tasks={oneTime} theme={selectedTheme} todayCheckins={todayCheckins} localDate={data.localDate} onMenu={(item, checkin) => setModal({ type: "task-menu", item, checkin })} onReorder={handleTaskReorder} onCompleted={(result) => result.status === "completed" && setCelebration({ taskTitle: result.taskTitle ?? "任务", score: result.awardedScore ?? 0, color: selectedTheme.color })} />
+      {view === "today" ? <TodayView themes={orderedThemes} tasks={orderedTasks} todayCheckins={todayCheckins} localDate={data.localDate} onMenu={(item, checkin) => setModal({ type: "task-menu", item, checkin })} onReorder={handleThemeTaskReorder} onCompleted={handleCheckinResult} /> : !selectedTheme ? <div className="empty-state"><h3>从一个主题开始</h3><p>比如阅读、运动或工作，然后把目标变成每日打卡。</p><button className="button" onClick={() => setModal({ type: "theme" })}>创建主题</button></div> : <>
+        <TaskSection title="习惯打卡" subtitle={`${habits.filter((task) => todayCheckins.has(task.id)).length}/${habits.length}`} tasks={habits} theme={selectedTheme} todayCheckins={todayCheckins} localDate={data.localDate} onMenu={(item, checkin) => setModal({ type: "task-menu", item, checkin })} onReorder={handleTaskReorder} onCompleted={(task, result) => handleCheckinResult(task, selectedTheme, result)} />
+        <TaskSection title="一次性任务" subtitle={`${oneTime.filter((task) => todayCheckins.has(task.id)).length}/${oneTime.length}`} tasks={oneTime} theme={selectedTheme} todayCheckins={todayCheckins} localDate={data.localDate} onMenu={(item, checkin) => setModal({ type: "task-menu", item, checkin })} onReorder={handleTaskReorder} onCompleted={(task, result) => handleCheckinResult(task, selectedTheme, result)} />
         {visibleTasks.length === 0 && <div className="empty-state"><h3>今天很轻盈</h3><p>当前主题还没有需要完成的任务。</p></div>}
       </>}
     </section>
 
-    <aside className="panel right-panel">
-      <h2 style={{ marginBottom: 5 }}>今日进度</h2><p className="muted" style={{ fontSize: 13 }}>专注当下的小小一步</p>
+    <aside className={`panel right-panel ${view === "today" ? "today-right-panel" : ""}`}>
+      {view === "today" ? <TodayStats themes={orderedThemes} tasks={orderedTasks} todayCheckins={todayCheckins} localDate={data.localDate} /> : <><h2 style={{ marginBottom: 5 }}>今日进度</h2><p className="muted" style={{ fontSize: 13 }}>专注当下的小小一步</p>
       <div className="progress-ring" style={{ "--value": percent } as CSSProperties}><div className="progress-value">{percent}%<small>已完成</small></div></div>
       <div className="stat-grid"><div className="stat-card"><strong>{completed}</strong><span>今日完成</span></div><div className="stat-card"><strong>{visibleTasks.length}</strong><span>计划任务</span></div><div className="stat-card"><strong>{streak}</strong><span>连续打卡</span></div><div className="stat-card"><strong>{data.themes.length}</strong><span>活跃主题</span></div></div>
       <Link href="/summary" className="button" style={{ width: "100%" }}>打开打卡总结　→</Link><div className="quote-card">不追求一次做到很多，只让今天比昨天多留下一点痕迹。</div>
+      </>}
     </aside>
 
     {modal?.type === "theme" && <ThemeModal item={modal.item} close={() => setModal(null)} />}
@@ -141,6 +160,40 @@ export function Dashboard({ user, data }: { user: { username: string; role: "adm
   </main>;
 }
 
+function isTodayTask(task: Task, localDate: string, todayCheckins: Map<string, Checkin>) {
+  if (task.type === "habit") return isScheduledOn(task, localDate);
+  return !task.dueDate || task.dueDate >= localDate || todayCheckins.has(task.id);
+}
+
+function TodayView({ themes, tasks, todayCheckins, localDate, onMenu, onReorder, onCompleted }: { themes: Theme[]; tasks: Task[]; todayCheckins: Map<string, Checkin>; localDate: string; onMenu: (task: Task, checkin?: Checkin) => void; onReorder: (themeId: string, ids: string[]) => void; onCompleted: (task: Task, theme: Theme, result: CheckinResult) => void }) {
+  const groups = themes.map((theme) => ({ theme, tasks: tasks.filter((task) => task.themeId === theme.id && isTodayTask(task, localDate, todayCheckins)) })).filter((group) => group.tasks.length);
+  if (!groups.length) return <div className="empty-state"><h3>今天没有安排</h3><p>回到主题页，添加一个值得记录的小任务吧。</p></div>;
+  return <div className="today-view">{groups.map(({ theme, tasks: groupTasks }) => <TodayTaskGroup key={theme.id} theme={theme} tasks={groupTasks} todayCheckins={todayCheckins} localDate={localDate} onMenu={onMenu} onReorder={onReorder} onCompleted={onCompleted} />)}</div>;
+}
+
+function TodayTaskGroup({ theme, tasks, todayCheckins, localDate, onMenu, onReorder, onCompleted }: { theme: Theme; tasks: Task[]; todayCheckins: Map<string, Checkin>; localDate: string; onMenu: (task: Task, checkin?: Checkin) => void; onReorder: (themeId: string, ids: string[]) => void; onCompleted: (task: Task, theme: Theme, result: CheckinResult) => void }) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  function handleDrag({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) return;
+    const oldIndex = tasks.findIndex((item) => item.id === active.id);
+    const newIndex = tasks.findIndex((item) => item.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    onReorder(theme.id, arrayMove(tasks, oldIndex, newIndex).map((item) => item.id));
+  }
+  const completed = tasks.filter((task) => todayCheckins.has(task.id)).length;
+  return <section className="today-group"><div className="today-group-heading"><div className="today-group-title"><span className="theme-dot" style={{ "--theme-color": theme.color } as CSSProperties}>{theme.icon}</span><h2>{theme.name}</h2></div><span>{completed}/{tasks.length} 完成</span></div><DndContext id={`today-${theme.id}`} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDrag}><SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}><div className="task-list">{tasks.map((task) => <SortableTask key={task.id} task={task} theme={theme} checkin={todayCheckins.get(task.id)} localDate={localDate} openMenu={() => onMenu(task, todayCheckins.get(task.id))} onCompleted={(item, result) => onCompleted(item, theme, result)} />)}</div></SortableContext></DndContext></section>;
+}
+
+function TodayStats({ themes, tasks, todayCheckins, localDate }: { themes: Theme[]; tasks: Task[]; todayCheckins: Map<string, Checkin>; localDate: string }) {
+  const groups = themes.map((theme) => ({ theme, tasks: tasks.filter((task) => task.themeId === theme.id && isTodayTask(task, localDate, todayCheckins)) })).filter((group) => group.tasks.length);
+  const allTasks = groups.flatMap((group) => group.tasks);
+  const completed = allTasks.filter((task) => todayCheckins.has(task.id));
+  const completedScore = completed.reduce((sum, task) => sum + (todayCheckins.get(task.id)?.awardedScore ?? task.completionScore), 0);
+  const incompleteScore = allTasks.filter((task) => !todayCheckins.has(task.id)).reduce((sum, task) => sum + task.incompleteScore, 0);
+  const totalScore = completedScore + incompleteScore;
+  return <><h2 style={{ marginBottom: 5 }}>今日统计</h2><p className="muted" style={{ fontSize: 13 }}>按主题模块查看完成情况</p><div className="progress-ring" style={{ "--value": allTasks.length ? Math.round((completed.length / allTasks.length) * 100) : 0 } as CSSProperties}><div className="progress-value">{allTasks.length ? Math.round((completed.length / allTasks.length) * 100) : 0}%<small>已完成</small></div></div><div className="stat-grid"><div className="stat-card"><strong>{allTasks.length}</strong><span>全部任务</span></div><div className="stat-card"><strong>{allTasks.length - completed.length}</strong><span>未完成</span></div><div className="stat-card"><strong className={totalScore < 0 ? "score-negative" : ""}>{totalScore > 0 ? "+" : ""}{totalScore}</strong><span>总得分</span></div><div className="stat-card"><strong>{completedScore > 0 ? "+" : ""}{completedScore}</strong><span>完成得分</span></div></div><div className="module-stats"><div className="module-stats-head"><strong>模块统计</strong><span>未完成 / 全部 · 得分</span></div>{groups.map(({ theme, tasks: groupTasks }) => { const groupCompleted = groupTasks.filter((task) => todayCheckins.has(task.id)); const groupScore = groupCompleted.reduce((sum, task) => sum + (todayCheckins.get(task.id)?.awardedScore ?? task.completionScore), 0) + groupTasks.filter((task) => !todayCheckins.has(task.id)).reduce((sum, task) => sum + task.incompleteScore, 0); return <div className="module-stat" key={theme.id}><span className="module-name"><i style={{ background: theme.color }} />{theme.name}</span><strong>{groupTasks.length - groupCompleted.length} / {groupTasks.length}</strong><em className={groupScore < 0 ? "score-negative" : ""}>{groupScore > 0 ? "+" : ""}{groupScore}</em></div>; })}</div><Link href="/summary" className="button" style={{ width: "100%" }}>打开打卡总结　→</Link></>;
+}
+
 function SortableTheme({ theme, active, select }: { theme: Theme; active: boolean; select: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: theme.id });
   return <div ref={setNodeRef} className={`theme-button sortable-row ${active ? "active" : ""} ${isDragging ? "dragging" : ""}`} style={{ transform: CSS.Transform.toString(transform), transition }}>
@@ -149,7 +202,7 @@ function SortableTheme({ theme, active, select }: { theme: Theme; active: boolea
   </div>;
 }
 
-function TaskSection({ title, subtitle, tasks, theme, todayCheckins, localDate, onMenu, onReorder, onCompleted }: { title: string; subtitle: string; tasks: Task[]; theme: Theme; todayCheckins: Map<string, Checkin>; localDate: string; onMenu: (task: Task, checkin?: Checkin) => void; onReorder: (ids: string[]) => void; onCompleted: (result: { status: "completed" | "undone"; taskTitle?: string; awardedScore?: number }) => void }) {
+function TaskSection({ title, subtitle, tasks, theme, todayCheckins, localDate, onMenu, onReorder, onCompleted }: { title: string; subtitle: string; tasks: Task[]; theme: Theme; todayCheckins: Map<string, Checkin>; localDate: string; onMenu: (task: Task, checkin?: Checkin) => void; onReorder: (ids: string[]) => void; onCompleted: (task: Task, result: CheckinResult) => void }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   if (!tasks.length) return null;
   function handleDrag({ active, over }: DragEndEvent) {
@@ -164,11 +217,11 @@ function TaskSection({ title, subtitle, tasks, theme, todayCheckins, localDate, 
   </section>;
 }
 
-function SortableTask({ task, theme, checkin, localDate, openMenu, onCompleted }: { task: Task; theme: Theme; checkin?: Checkin; localDate: string; openMenu: () => void; onCompleted: (result: { status: "completed" | "undone"; taskTitle?: string; awardedScore?: number }) => void }) {
+function SortableTask({ task, theme, checkin, localDate, openMenu, onCompleted }: { task: Task; theme: Theme; checkin?: Checkin; localDate: string; openMenu: () => void; onCompleted: (task: Task, result: CheckinResult) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   return <article ref={setNodeRef} className={`task-card ${checkin ? "completed" : ""} ${isDragging ? "dragging" : ""}`} style={{ transform: CSS.Transform.toString(transform), transition }}>
     <button className="drag-handle task-drag" aria-label={`拖动调整 ${task.title} 的顺序`} {...attributes} {...listeners}>⠿</button>
-    <CheckinButton taskId={task.id} localDate={localDate} checkin={checkin} color={theme.color} onCompleted={onCompleted} />
+    <CheckinButton taskId={task.id} localDate={localDate} checkin={checkin} color={theme.color} onCompleted={(result) => onCompleted(task, result)} />
     <div><div className="task-title">{task.title}</div><div className="task-meta"><span>完成 {task.completionScore > 0 ? "+" : ""}{task.completionScore} · 未完成 {task.incompleteScore > 0 ? "+" : ""}{task.incompleteScore}</span>{task.description && <span>{task.description}</span>}{task.dueDate && <span>截止 {task.dueDate.slice(5).replace("-", "/")}</span>}{task.type === "habit" && <span>{task.recurrenceMask === 127 ? "每天" : WEEKDAYS.filter((_, i) => task.recurrenceMask & (1 << i)).map((d) => `周${d}`).join("、")}</span>}{checkin?.note && <span>已记录感想</span>}</div></div>
     <button className="icon-button" onClick={openMenu} aria-label={`${task.title} 更多操作`}>···</button>
   </article>;
