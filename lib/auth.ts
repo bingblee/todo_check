@@ -8,9 +8,16 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { sessions, users, type User } from "@/lib/db/schema";
 
-const BASE_COOKIE_NAME = "checkin_session";
+const DEFAULT_COOKIE_NAME = "todo_check_session";
 const SESSION_DAYS = 30;
 const scrypt = promisify(nodeScrypt);
+
+function baseCookieName() {
+  const configured = process.env.AUTH_COOKIE_NAME?.trim();
+  if (!configured) return DEFAULT_COOKIE_NAME;
+  const safe = configured.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "");
+  return safe || DEFAULT_COOKIE_NAME;
+}
 
 function appBasePath() {
   const value = process.env.APP_BASE_PATH?.trim() ?? "";
@@ -20,7 +27,8 @@ function appBasePath() {
 
 function sessionCookieName() {
   const suffix = appBasePath().slice(1).replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return suffix ? `${BASE_COOKIE_NAME}_${suffix}` : BASE_COOKIE_NAME;
+  const name = baseCookieName();
+  return suffix ? `${name}_${suffix}` : name;
 }
 
 function sessionCookiePath() {

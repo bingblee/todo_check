@@ -50,6 +50,8 @@ AUTH_COOKIE_SECURE=true
 
 注意：`APP_BASE_PATH` 只表示反向代理挂载的公共前缀，不是应用内的 `/app` 页面路径。Session Cookie 使用全站 `/` 路径，以便在 `/app`、`/summary`、`/settings` 和 `/today` 之间保持登录状态。
 
+如果同一域名或服务器上还部署了其他项目，请为每个项目设置不同的 `AUTH_COOKIE_NAME`。本项目默认使用 `todo_check_session`，避免与其他项目的通用 `session` Cookie 相互覆盖。
+
 Nginx 要保留 `/todo` 前缀并传递外部协议：
 
 ```nginx
